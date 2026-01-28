@@ -9,6 +9,7 @@
 
 ## 2. Architecture Overview
 
+```mermaid
 graph TD
     A[Raw L1/L2 Data] -->|Rust| B(Stream Processor)
     B -->|Update| C{Limit Order Book State}
@@ -18,6 +19,7 @@ graph TD
     F -->|Python| G[Labeling: Triple Barrier]
     G -->|Python| H[Model Training: TCN / XGBoost]
     H -->|Backtest| I[Event-Driven Simulator]
+```
 
 ## 3. Data Engineering (Rust Preprocessor)
 
