@@ -1,9 +1,3 @@
-Here is the comprehensive project blueprint for **Iteration 4**. This documentation bridges the gap between high-frequency data and mid-frequency predictions (5-10 minutes).
-
-You can copy the content below and save it as `PROJECT_BLUEPRINT.md`.
-
----
-
 # Project Blueprint: NQ Microstructure-Aware Alpha (Iteration 4)
 
 ## 1. Executive Summary
