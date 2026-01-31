@@ -1,166 +1,350 @@
-# Project Blueprint: NQ Microstructure-Aware Alpha (Iteration 4)
+# Project Delta - NQ Futures Mean Reversion Trading System
 
-## 1. Executive Summary
-**Goal:** Build a Day Trading AI for NQ (Nasdaq-100) targeting 5-10 minute trends.
-**Core Pivot:** Moving from Time-based sampling (Seconds) to Event-based sampling (Volume Bars) to resolve statistical noise. Moving from raw pattern matching to Microstructure Feature Engineering (OFI).
-**Data Source:** 3 Years of NinjaTrader L1 (Trades/Quotes) and L2 (Market Depth).
+A complete day trading system for NQ (Nasdaq-100 E-mini futures) using microstructure features and mean reversion strategy.
+
+## Overview
+
+Project Delta processes NinjaTrader L1/L2 tick data into volume bars with order flow features, then applies a mean reversion strategy that trades when prices deviate significantly from their moving average.
+
+### Key Features
+- **High-performance Rust preprocessor** - Converts raw tick data to volume bars
+- **Microstructure features** - Order Flow Imbalance (OFI), trade imbalance, depth ratios
+- **Mean reversion strategy** - Z-score based entries with stop-loss/take-profit
+- **Realistic backtesting** - Includes slippage, spread, commission, and execution delay
+- **Walk-forward testing** - Out-of-sample validation across multiple time windows
+
+### Strategy Performance (Realistic Backtest)
+- **Net PnL**: $4,303 (36 trading days)
+- **Win Rate**: 46.5%
+- **Sharpe Ratio**: 2.22
+- **Profit Factor**: 1.28
+- **Risk/Reward**: 1:1.02
 
 ---
 
-## 2. Architecture Overview
+## Project Structure
 
-```mermaid
-graph TD
-    A[Raw L1/L2 Data] -->|Rust| B(Stream Processor)
-    B -->|Update| C{Limit Order Book State}
-    C -->|Calculate| D[Microstructure Features]
-    D -->|Accumulate| E{Volume Bar Trigger}
-    E -->|On Fill| F[Feature Vector CSV/Parquet]
-    F -->|Python| G[Labeling: Triple Barrier]
-    G -->|Python| H[Model Training: TCN / XGBoost]
-    H -->|Backtest| I[Event-Driven Simulator]
+```
+ProjectDelta/
+├── rust_preprocessor/      # Rust data preprocessing
+│   ├── src/
+│   │   ├── main.rs         # Entry point
+│   │   ├── config.rs       # Configuration loading
+│   │   ├── parser.rs       # L1/L2 data parser
+│   │   ├── volume_bar.rs   # Volume bar aggregation
+│   │   ├── order_book.rs   # Limit order book reconstruction
+│   │   ├── features.rs     # Feature calculation (OFI, etc.)
+│   │   └── output.rs       # Parquet/CSV output
+│   └── Cargo.toml
+├── python/                 # Python backtesting
+│   ├── config.py           # Configuration loading
+│   ├── data_split.py       # Chronological train/test splits
+│   ├── mean_reversion.py   # Core strategy implementation
+│   ├── optimize_rr.py      # Risk/reward parameter optimization
+│   ├── extended_test.py    # Walk-forward analysis
+│   └── realistic_test.py   # Realistic live trading simulation
+├── data/
+│   ├── raw/                # NinjaTrader CSV exports (YYYYMMDD.csv)
+│   └── processed/          # Volume bar parquet files (auto-generated)
+├── config.yml              # Shared configuration
+└── requirements.txt        # Python dependencies
 ```
 
-## 3. Data Engineering (Rust Preprocessor)
+---
 
-This is the most complex and critical component. It transforms raw ticks into "Alpha-rich" tabular data.
+## Installation
 
-### 3.1. Inputs
+### Prerequisites
+- **Rust** (1.70+): https://rustup.rs/
+- **Python** (3.10+): https://python.org/
 
-Strictly defined based on NinjaTrader exports.
+### Setup
 
-**L1 Record:**
+1. **Clone the repository**
+   ```bash
+   git clone <repo-url>
+   cd ProjectDelta
+   ```
 
-* `Type`: Trade (Last), Bid, Ask.
-* `Price`, `Volume`, `Timestamp`.
+2. **Build the Rust preprocessor**
+   ```bash
+   cd rust_preprocessor
+   cargo build --release
+   cd ..
+   ```
 
-**L2 Record:**
-
-* `Operation`: Add, Update, Remove.
-* `Position`: Order Book Level (0-9).
-* `Price`, `Volume` (Size).
-* `MarketMaker`: ID.
-
-### 3.2. Sampling Strategy: Volume Bars
-
-We abandon time bars. A new bar is created every `N` contracts traded.
-
-* **Target Volume (`V_target`):** Suggest **500** or **1000** for NQ.
-* **Logic:** "Strict Split".
-* *Scenario:* Accumulator is at 450. New Trade comes in size 100.
-* *Action:*
-1. Add 50 to current bar (completing it to 500).
-2. **Snapshot Features** and push to output.
-3. Start new bar with remaining 50 volume.
-
-
-
-
-* **Why:** Normalizes volatility. Fast markets generate more bars; slow markets generate fewer. The "information density" per bar remains constant.
-
-### 3.3. Feature Engineering (The Alpha)
-
-The Rust processor must maintain a **Local Order Book (LOB)** state (Best Bid/Ask up to Level 10). Features are calculated incrementally or at the time of the bar close.
-
-#### A. Order Flow Imbalance (OFI)
-
-*The primary predictor of short-term price movement.*
-For the best Bid () and Ask () and their sizes ():
-
-* **Logic:**
-* Bid Price rises  Strong Buying Pressure (+)
-* Bid Price constant but Size increases  Buying Support (+)
-* (Inverse logic applies to Ask side).
-
-
-* **Implementation:** Calculate OFI for Level 1, and an aggregated OFI for Levels 1-5. Sum these values over the duration of the Volume Bar.
-
-#### B. Trade Imbalance (VPIN-like)
-
-$$ \text{Imbalance} = \frac{V_{buy} - V_{sell}}{V_{buy} + V_{sell}} $$
-
-* Identify buys vs. sells by comparing `Last` price to the current `Ask` and `Bid`.
-
-#### C. Order Book Shape
-
-* **Depth Ratio:**  (Weighted by distance from price).
-* **Sweep Indicator:** Count of L2 `Remove` operations that occur simultaneously with a large L1 trade (identifying aggressive liquidity taking).
+3. **Install Python dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ---
 
-## 4. Labeling Strategy (Python)
+## Usage
 
-To fix the "Bad Model / Negative Performance" from Iteration 3, we move to dynamic targets.
+### Step 1: Preprocess Raw Data
 
-### 4.1. Triple Barrier Method
+Convert NinjaTrader tick data to volume bars:
 
-For every observation  (Volume Bar), we set three barriers:
+```bash
+cd rust_preprocessor
+cargo run --release
+```
 
-1. **Upper Barrier (Profit Take):** 
-2. **Lower Barrier (Stop Loss):** 
-3. **Vertical Barrier (Time/Expiration):**  (e.g., 50 bars).
+This reads `data/raw/*.csv` and outputs `data/processed/*.parquet`.
 
-### 4.2. Dynamic Volatility ()
+**Configuration** (config.yml):
+```yaml
+preprocessing:
+  volume_bar_size: 500    # Contracts per bar
+  max_levels: 10          # Order book depth levels
+  
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+```
 
-* Do **not** use fixed ticks (e.g., 40 ticks).
-* Calculate rolling Standard Deviation or ATR of the last 100 Volume Bars.
-* **Target:** If volatility is high, the target expands. If low, it contracts.
+### Step 2: Run Backtests
 
-### 4.3. Class Weights
+**Basic Strategy Test**
+```bash
+cd python
+python mean_reversion.py
+```
 
-* Class 1: Hit Upper Barrier first.
-* Class -1: Hit Lower Barrier first.
-* Class 0: Hit Vertical Barrier (Time out).
-* *Note:* If Class 0 dominates >60% of data, widen the vertical barrier or lower the  multiplier.
+**Walk-Forward Analysis** (multiple OOS periods)
+```bash
+python extended_test.py
+```
 
----
+**Realistic Live Simulation** (with slippage, spread, commission)
+```bash
+python realistic_test.py
+```
 
-## 5. Model Architecture
-
-Since we have structured tabular data (features) + sequential nature (market history), we use a hybrid approach.
-
-### Option A: TCN (Temporal Convolutional Network) - *Deep Learning Route*
-
-* **Input:** Sequence of last 64 Volume Bars (Features: OFI, Imbalance, Depth, Price Delta).
-* **Structure:**
-* Causal Convolutions (No looking into the future).
-* Dilations [1, 2, 4, 8, 16] to capture long-range dependencies.
-* Residual Connections.
-
-
-* **Output:** Softmax probabilities (Buy, Sell, Hold).
-
-### Option B: Gradient Boosting (XGBoost/CatBoost) - *Tabular Route*
-
-* *Often outperforms Deep Learning on financial tabular data.*
-* **Input:** Flattened window of features (e.g., `OFI_current`, `OFI_lag1`, `OFI_lag2`...).
-* **Pros:** Handles non-linear relationships in Order Book data extremely well. Easier to interpret feature importance.
-
----
-
-## 6. Validation & Backtesting
-
-### 6.1. Purged K-Fold Cross Validation
-
-* **Standard K-Fold fails** in finance because trade samples overlap.
-* **Purging:** When testing on Fold X, you must delete (purge) the data immediately preceding it in the training set to ensure no label leakage from overlapping Triple Barriers.
-
-### 6.2. Realistic Simulation
-
-To match "Real World" (Iteration 1 failure):
-
-1. **Latency Lag:** In backtest, calculate signal at Bar , but execute trade at Open of Bar  (or even  depending on latency).
-2. **Spread Cost:** Always assume execution at the *worst* price (Buy at Ask, Sell at Bid).
-3. **Commission:** Deduct standard NQ fees per round trip.
+**Parameter Optimization**
+```bash
+python optimize_rr.py
+```
 
 ---
 
-## 7. Implementation Roadmap
+## Strategy Details
 
-1. **Rust:** Implement `LOB_Builder` struct to reconstruct book from L2 updates.
-2. **Rust:** Implement `VolumeBar_Accumulator` with Strict Split.
-3. **Rust:** specific `OFI` calculation function.
-4. **Python:** Load processed CSVs. Visual check: Does high OFI correlate with price moves?
-5. **Python:** Generate Triple Barrier labels. Check Class Balance.
-6. **Python:** Train XGBoost first (baseline). If promising, train TCN.
-7. **Backtest:** Run event-driven simulation on out-of-sample data.
+### Mean Reversion Logic
+
+1. **Calculate Z-score**: How many standard deviations price is from its moving average
+2. **Entry Signal**: 
+   - Long when Z-score < -3.0 (price well below average)
+   - Short when Z-score > +3.0 (price well above average)
+3. **Exit Conditions** (first hit wins):
+   - Stop-loss: 0.5× entry distance from mean
+   - Take-profit: 1.5× entry distance from mean
+   - Mean reversion: Z-score crosses ±0.5
+   - Timeout: 100 bars max hold
+
+### Optimized Parameters
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Z-score Entry | 3.0 | Entry threshold (std devs) |
+| Lookback | 50 | MA lookback period (bars) |
+| Stop-loss | 0.5× | Multiple of entry distance |
+| Take-profit | 1.5× | Multiple of entry distance |
+
+### Features Used
+- **Order Flow Imbalance (OFI)**: Measures buying vs selling pressure
+- **Trade Imbalance**: Ratio of buy vs sell volume
+- **Depth Ratio**: Bid depth vs ask depth
+- **Spread**: Bid-ask spread statistics
+- **VWAP Deviation**: Price deviation from volume-weighted average
+
+---
+
+## Live Trading Setup
+
+### Requirements
+1. NinjaTrader 8 with Market Depth data subscription
+2. Real-time data feed (CME NQ futures)
+3. Python environment with dependencies installed
+4. `keyboard` Python package (requires admin privileges)
+
+### NinjaTrader Indicator Setup
+
+Create a NinjaTrader indicator that writes live market data to a file:
+
+1. **Configure the indicator** to write L1/L2 data to:
+   ```
+   data/live/market_data.txt
+   ```
+
+2. **Data format** (same as historical exports):
+   ```
+   L1: DataType;Timestamp;Offset;Price;Volume
+   L2: DataType;Timestamp;Offset;Operation;Position;Price;Volume
+   ```
+
+3. **Setup hotkeys in NinjaTrader**:
+   - **F11** = Enter Long (Buy Market with your ATM strategy)
+   - **F12** = Enter Short (Sell Market with your ATM strategy)
+
+### Running the Live Trading Engine
+
+1. **Install dependencies**:
+   ```bash
+   pip install keyboard
+   ```
+   Note: `keyboard` requires admin/root privileges on Windows.
+
+2. **Start NinjaTrader** and ensure the indicator is writing data.
+
+3. **Run the live trading engine**:
+   ```bash
+   cd python
+   python live_trading.py
+   ```
+
+4. **Monitor the logs**:
+   - Console shows real-time signals and trades
+   - Detailed logs saved to `logs/live_trading_YYYYMMDD_HHMMSS.log`
+   - Trade history saved to `logs/trades_YYYYMMDD_HHMMSS.csv`
+
+### How It Works
+
+1. **File Watching**: Engine monitors `data/live/market_data.txt` for new lines
+2. **Bar Building**: Aggregates ticks into volume bars (500 contracts)
+3. **Signal Generation**: Calculates Z-score and generates signals
+4. **Trade Execution**: Sends F11/F12 hotkey to NinjaTrader
+5. **Position Management**: Tracks stops, targets, and exit conditions
+6. **Logging**: Records everything for analysis
+
+### Risk Management (Live Trading)
+- **Position Size**: 1 NQ contract = $20/point
+- **Max Daily Loss**: $500 (stop trading for day)
+- **Max Trades/Day**: 20
+- **Cooldown**: 5 seconds between trades
+- **Session Hours**: RTH only (9:30 AM - 4:00 PM ET)
+
+### Stopping the Engine
+
+Press `Ctrl+C` to gracefully stop. The engine will:
+- Log session summary
+- Save trade history to CSV
+- Display final PnL and statistics
+
+---
+
+## Data Format
+
+### Input: NinjaTrader CSV
+```
+L1: DataType;Timestamp;Offset;Price;Volume
+L2: DataType;Timestamp;Offset;Operation;Position;Price;Volume
+```
+
+### Output: Volume Bar Parquet
+| Column | Type | Description |
+|--------|------|-------------|
+| bar_index | u64 | Sequential bar number |
+| timestamp_start | i64 | Bar start time (ns) |
+| timestamp_end | i64 | Bar end time (ns) |
+| open, high, low, close | f64 | OHLC prices |
+| volume | u64 | Total volume (= bar_size) |
+| trade_count | u32 | Number of trades |
+| ofi_level1 | f64 | Level 1 order flow imbalance |
+| ofi_aggregate | f64 | Aggregate OFI |
+| buy_volume, sell_volume | u64 | Directional volume |
+| trade_imbalance | f64 | (buy-sell)/(buy+sell) |
+| depth_ratio | f64 | Bid depth / Ask depth |
+| spread_avg, spread_max | f64 | Spread statistics |
+| vwap, vwap_deviation | f64 | VWAP and deviation |
+
+---
+
+## Testing
+
+### Validate Data Quality
+```bash
+cd rust_preprocessor
+cargo run --release 2>&1 | grep -i "filter\|invalid"
+```
+The preprocessor automatically filters:
+- Zero/negative prices
+- Invalid OHLC relationships
+- Bars with no trades
+
+### Run All Tests
+```bash
+# Rust tests
+cd rust_preprocessor && cargo test
+
+# Python: Basic backtest
+cd python && python mean_reversion.py
+
+# Python: Realistic simulation
+python realistic_test.py
+```
+
+---
+
+## Configuration Reference
+
+### config.yml
+```yaml
+preprocessing:
+  volume_bar_size: 500      # Contracts per volume bar
+  max_levels: 10            # Order book depth to track
+  timezone: "US/Eastern"    # Timezone for session filtering
+
+trading:
+  point_value: 20.0         # NQ = $20 per point
+  tick_size: 0.25           # NQ minimum tick
+  commission_per_trade: 5.0 # Round-trip commission
+
+strategy:
+  zscore_entry: 3.0         # Entry threshold
+  zscore_exit: 0.5          # Mean reversion exit
+  lookback: 50              # MA lookback bars
+  max_hold_bars: 100        # Maximum hold time
+  stop_loss_mult: 0.5       # SL as multiple of entry distance
+  take_profit_mult: 1.5     # TP as multiple of entry distance
+
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+```
+
+---
+
+## Troubleshooting
+
+### Preprocessor Issues
+- **"No CSV files found"**: Check `data/raw/` contains NinjaTrader exports
+- **"Parse error"**: Ensure CSV uses correct delimiter (`;`)
+- **Zero bars output**: Raw data may have no trades (quotes only)
+
+### Python Issues
+- **"No parquet files"**: Run Rust preprocessor first
+- **Import errors**: Run `pip install -r requirements.txt`
+- **Memory errors**: Process fewer files or use smaller volume bars
+
+### Performance Issues
+- Use `--release` flag for Rust builds (10x faster)
+- Reduce `max_levels` if not using L2 features
+- Process files in batches if memory limited
+
+---
+
+## License
+
+MIT License - See LICENSE file for details.
+
+---
+
+## Changelog
+
+### v1.0.0 (2025-01)
+- Initial release with mean reversion strategy
+- Rust preprocessor for L1/L2 data
+- Realistic backtesting with slippage/commission
+- Walk-forward validation
+

@@ -1,0 +1,16 @@
+# Python dependencies for Project Delta - NQ Mean Reversion Strategy
+
+# Core Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+polars>=0.20.0
+pyarrow>=14.0.0
+
+# Configuration
+pyyaml>=6.0.0
+
+# Utilities
+tqdm>=4.66.0
+
+# Live Trading
+keyboard>=0.13.5  # For hotkey execution (requires admin on Windows)

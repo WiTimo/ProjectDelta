@@ -1,0 +1,85 @@
+# Project Delta Configuration
+# NQ Futures Mean Reversion Trading System
+
+# =============================================================================
+# DATA PATHS
+# =============================================================================
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/preprocessed"
+
+# =============================================================================
+# PREPROCESSING (Rust)
+# =============================================================================
+preprocessing:
+  # Volume bar configuration
+  volume_bar_size: 500    # Contracts per bar (recommended: 500-1000 for NQ)
+  
+  # Order book configuration
+  max_levels: 10          # Maximum depth levels to track
+  ofi_levels: 5           # Levels for aggregated OFI calculation
+  
+  # Trading hours filter (Eastern Time)
+  trading_hours:
+    enabled: true
+    start_time: "09:30:00"  # RTH start
+    end_time: "16:00:00"    # RTH end
+
+# =============================================================================
+# TRADING PARAMETERS
+# =============================================================================
+trading:
+  # NQ Contract Specifications
+  point_value: 20.0       # NQ = $20 per point
+  tick_size: 0.25         # NQ minimum tick
+  
+  # Transaction Costs
+  commission_per_trade: 5.0   # Round-trip commission
+  slippage_ticks: 1           # Expected slippage in ticks
+  spread_ticks: 1             # Typical bid-ask spread
+
+# =============================================================================
+# MEAN REVERSION STRATEGY
+# =============================================================================
+strategy:
+  # Entry Parameters
+  zscore_entry: 3.0       # Enter when Z-score exceeds this (std devs)
+  zscore_exit: 0.5        # Exit on mean reversion when Z-score below this
+  lookback: 50            # Moving average lookback (bars)
+  
+  # Risk Management
+  stop_loss_mult: 0.5     # Stop-loss as multiple of entry distance from MA
+  take_profit_mult: 1.5   # Take-profit as multiple of entry distance from MA
+  max_hold_bars: 100      # Maximum bars to hold position
+  
+  # Position Sizing
+  contracts: 1            # Number of contracts per trade
+  max_daily_trades: 20    # Maximum trades per day
+  max_daily_loss: 500.0   # Stop trading if daily loss exceeds this
+
+# =============================================================================
+# BACKTESTING
+# =============================================================================
+backtesting:
+  # Realistic Execution Simulation
+  execution_delay_bars: 1     # Bars delay between signal and execution
+  use_slippage: true          # Apply slippage model
+  use_spread: true            # Apply bid-ask spread
+  
+  # Walk-Forward Parameters
+  train_window_days: 15       # Days for training window
+  test_window_days: 5         # Days for testing window
+  step_size_days: 5           # Days to step forward
+# =============================================================================
+# LIVE TRADING
+# =============================================================================
+live:
+  # Data file (NinjaTrader indicator writes here)
+  data_file: "data/live/market_data.txt"
+  
+  # Hotkeys for trade execution
+  long_hotkey: "F11"
+  short_hotkey: "F12"
+  
+  # Cooldown between trades (seconds)
+  cooldown_seconds: 5.0
