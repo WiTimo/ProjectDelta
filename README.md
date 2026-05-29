@@ -1,5 +1,5 @@
 # Project Delta
-
+ 
 Project Delta is an NQ futures market microstructure research system built around a rules-based mean-reversion strategy. It converts NinjaTrader L1/L2 tick data into volume bars, calculates order-flow features, and evaluates a z-score mean-reversion strategy with realistic backtest assumptions.
 
 Unlike the earlier ML-focused projects, Project Delta is intentionally simpler and more interpretable: it tests whether transparent order-flow and price-deviation rules can produce useful behavior before adding more complex machine learning.
